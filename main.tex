@@ -1,0 +1,110 @@
+% \documentclass[twocolumn]{aastex62}
+\documentclass[modern]{aastex62}
+
+\usepackage{bm}
+
+\newcommand{\radmc}{\texttt{RADMC-3D}}
+\newcommand\kms{\ifmmode{\rm km\thinspace s^{-1}}\else km\thinspace s$^{-1}$\fi}
+\newcommand{\todo}[1]{ \textcolor{red}{#1}}
+\newcommand{\vt}{ {\bm \theta}}
+\newcommand{\msun}{M$_\odot$}
+\newcommand{\obj}{GW\,Ori}
+\newcommand{\twelve}{${}^{12}$CO}
+\newcommand{\thirteen}{${}^{13}$CO}
+\newcommand{\eighteen}{C${}^{18}$O}
+
+\newcommand{\vd}{\boldsymbol{\mathcal{V}}} % visibility data 
+\newcommand{\vm}{\boldsymbol{\mathcal{W}}} % visibility model
+\newcommand{\btheta}{\boldsymbol{\theta}} % parameter vector
+
+% standardizing notation
+%
+% disk parameters
+% i_\mathrm{disk} (not i_d or i)
+%
+% orbit parameters
+% i_\mathrm{in}
+% i_\mathrm{out}
+
+% stellar masses
+% M_\ast 
+
+\begin{document}
+
+
+\title{A Million Points of Light}
+
+\correspondingauthor{Ian Czekala}
+\email{iczekala@berkeley.edu}
+
+\author[0000-0002-1483-8811]{Ian Czekala}
+\altaffiliation{NASA Hubble Fellowship Program Sagan Fellow}
+\affiliation{Department of Astronomy, 501 Campbell Hall, University of California, Berkeley, CA 94720-3411, USA}
+
+
+\begin{abstract}
+Fast computation of protoplanetary disk channel maps for molecular gas lines. With gradients (we hope).
+\end{abstract}
+
+\keywords{protoplanetary disks -- stars: pre-main sequence}
+
+\section{Introduction} \label{sec:intro}
+
+There have been some cool new techniques to model rotation curves derived from high resolution (spatial and spectra) images of protoplanetary disks. for example, \citet{yen16,yen18} stacking lines to detect faint transitions and measure dynamical masses. Also to probe perturbations to velocity fields to search for the influence of exoplanets \citet{teague18a} and perturbations to the pressure profiles in disks \citet{teague18c}.
+
+How smooth is the radial profile, and can we use a Nuker profile to model it?
+
+% \begin{figure*}[ht!]
+% \begin{center}
+%   \includegraphics[width=\linewidth]{moments.pdf}
+%   \figcaption{({\it left}) A 226\,GHz continuum image.  Contours start at 5$\times$ the RMS noise level and increase by factors of 2.  The synthesized beam geometry is shown in the lower left corner.  ({\it middle, left to right}) Maps of the $^{12}$CO, $^{13}$CO, and C$^{18}$O velocity-integrated intensities (contours, starting at 10, 3, and 3$\times$ the RMS noise levels, respectively, and increasing by factors of 2) overlaid on the intensity-weighted projected velocities (color-scale).  Note the prominent molecular cloud contamination in the $^{12}$CO map (see also Fig.~\ref{fig:chanmaps}).  ({\it right}) Spatially integrated spectra (inside the same {\tt CLEAN} mask, and smoothed with an 0.85\,km\,s$^{-1}$ Hanning kernel) for each CO line.
+%   \label{fig:moments}}
+%   \end{center}
+% \end{figure*}
+
+
+\subsection{Likelihood Calculation}
+
+Define our visibility data as $\boldsymbol{\mathcal{V}}$.
+Define our visibility model as $\boldsymbol{\mathcal{W}}(\boldsymbol{\theta})$.
+
+Typically done as 
+\begin{equation}
+    {\cal L}(\boldsymbol{\theta}) = {\cal N}(\boldsymbol{\mathcal{V}} |\, \boldsymbol{\mathcal{W}}(\boldsymbol{\theta}), \boldsymbol{C})
+\end{equation}
+Typically we just treat the visibilities as independent measurements, and so we have a simple $\chi^2$ likelihood of 
+\begin{equation}
+    \ln {\cal L}(\btheta) = - \frac{1}{2} \sum_i^N \frac{|\vd - \vm(\btheta)|^2}{\sigma_i^2}.
+\end{equation}
+Note that the likelihood is a scalar quantity. Next, we want to calculate the derivative of the likelihood
+\begin{equation}
+    \frac{\mathrm{d}\mathcal{L}(\btheta)}{\mathrm{d}\btheta}.
+\end{equation}
+The main image is $I(x,y,\nu)$. The 2D Fourier transform (FT) of this image is 
+\begin{equation}
+    V(u,v,\nu) = \mathcal{F}(I).
+\end{equation}
+We're assuming that each frequency channel of the channel maps are independent. Baseline-dependent phase errors may make this less true. See \citet{hezaveh13} for the proper way to bake these into the inference loop, if we so desire, but we will just ignore them for now.
+
+Real $\Re$ and imaginary $\Im$ and $\imath$.
+
+DFM points out that, in theory, we can also create disk code that can deliver us a derivative of the likelihood function. This is great, because we can feed this into techniques like Hamiltonian Monte Carlo and access a much larger set of parameter space. We are going to need this, I think, if we actually want disk models that are realistic.
+
+The idea is to start writing the change in derivative with respect to the interpolated visibilities.
+
+Then, we probably need to write down the change in interpolated visibility. Due to the FFT, though, this is going to require a knowing the changes of all of the other pixels. 
+
+If we can reduce this to knowing the change in a single pixel, then that change in intensity, with respect to the parameters, is possible to compute.
+
+It may be possible to introduce correction to the phase errors, as well.
+
+
+\acknowledgments
+
+% \software{CASA \citep[v4.4;][]{mcmullin07}, IRAF \citep{tody86,tody93}, DiskJockey \citep{czekala15a}, RADMC-3D \citep{dullemond12}, emcee \citep{foreman-mackey13}, VARTOOLS \citep{hartman16}, Astropy \citep{astropy13}}
+
+\bibliographystyle{yahapj.bst}
+\bibliography{biblio.bib}
+
+
+\end{document}
