@@ -50,9 +50,11 @@ Fast computation of protoplanetary disk channel maps for molecular gas lines. Wi
 
 \section{Introduction} \label{sec:intro}
 
-There have been some cool new techniques to model rotation curves derived from high resolution (spatial and spectra) images of protoplanetary disks. for example, \citet{yen16,yen18} stacking lines to detect faint transitions and measure dynamical masses. Also to probe perturbations to velocity fields to search for the influence of exoplanets \citet{teague18a} and perturbations to the pressure profiles in disks \citet{teague18c}.
+There have been some cool new techniques to model rotation curves derived from high resolution (spatial and spectra) images of protoplanetary disks. for example, \citet{yen16,yen18} stacking lines to detect faint transitions and measure dynamical masses. Also to probe perturbations to velocity fields to search for the influence of exoplanets \citet{teague18a} and perturbations to the pressure profiles in disks \citet{teague18c}. 
 
-How smooth is the radial profile, and can we use a Nuker profile to model it?
+In this paper, we try to incorporate some ideas inspired by these data-driven techniques into our modus operandi, which is fitting the visibilities directly using the Fourier transform of a sky brightness model. We'll also try to be smart about how we calculate the model visibilities, in such a way that we can also calculate derivatives in order to efficiently use high dimensional optimization and inference schemes. 
+
+Because our goal is to make the Fourier part somewhat generic to the parameterization of the sky model, we'll take the following order. First, we'll describe just enough of the sky model to give context to what we mean. Then, we'll develop the mathematical framework to calculate the model visibilities and their derivatives. Finally, we'll circle back and describe a specific implementation for the sky model and discuss how it might be extended.
 
 % \begin{figure*}[ht!]
 % \begin{center}
@@ -62,6 +64,10 @@ How smooth is the radial profile, and can we use a Nuker profile to model it?
 %   \end{center}
 % \end{figure*}
 
+\section{Sky model basics}
+Interferometers like ALMA measure the Fourier transform of the sky brightness, as a function of frequency. Our first task is to describe the sky brightness model, $I(x, y, \nu)$, which is a function of position and frequency. This has units of intensity, or something like Jy/beam or Jy/sterradian. The position x, y, is directly related to the RA, DEC, based upon the distance to the source, so we end up with a model of $I(l, m, \nu)$, where $l$ is the RA coordinate (in radians) and $m$ is the dec coordinate (in radians). Like RA, $l$ increases towards the east (left) of images.
+
+The model parameters generally break down into two groups, those that are required to describe the morphology of the intensity, and those geometric parameters that describe the rotation or translation of the emission. The second group of parameters can be easily applied in the Fourier domain via the shift and rotation theorems.
 
 \subsection{Likelihood Calculation}
 
@@ -97,6 +103,9 @@ Then, we probably need to write down the change in interpolated visibility. Due 
 If we can reduce this to knowing the change in a single pixel, then that change in intensity, with respect to the parameters, is possible to compute.
 
 It may be possible to introduce correction to the phase errors, as well.
+
+\section{Modeling the radial intensity profile}
+How smooth is the radial profile, and can we use a Nuker profile to model it?
 
 
 \acknowledgments
