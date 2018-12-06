@@ -4,6 +4,10 @@
 \usepackage{bm}
 \usepackage{amsmath}
 
+\usepackage[OT2,T1]{fontenc}
+\DeclareSymbolFont{cyrletters}{OT2}{wncyr}{m}{n}
+\DeclareMathSymbol{\Sha}{\mathalpha}{cyrletters}{"58}
+
 
 \newcommand{\radmc}{\texttt{RADMC-3D}}
 \newcommand\kms{\ifmmode{\rm km\thinspace s^{-1}}\else km\thinspace s$^{-1}$\fi}
@@ -15,10 +19,12 @@
 \newcommand{\thirteen}{${}^{13}$CO}
 \newcommand{\eighteen}{C${}^{18}$O}
 
+\newcommand{\im}{\boldsymbol{I}_\blacksquare}
 \newcommand{\vd}{\boldsymbol{\mathcal{V}}} % visibility data
 \newcommand{\vm}{\boldsymbol{\mathcal{W}}} % visibility model
 \newcommand{\bbeta}{\boldsymbol{\beta}} % disk structure parameter vector
 \newcommand{\btheta}{\boldsymbol{\theta}} % all parameter vector
+\newcommand{\ct}{c_{\,\blacksquare}}
 
 % standardizing notation
 %
@@ -46,18 +52,16 @@
 
 
 \begin{abstract}
-Fast computation of protoplanetary disk channel maps for molecular gas lines. With gradients (we hope).
+Fast computation of protoplanetary disk models of molecular gas emission. With likelihood gradients (we hope).
 \end{abstract}
 
 \keywords{protoplanetary disks -- stars: pre-main sequence}
 
 \section{Introduction} \label{sec:intro}
 
-There have been some cool new techniques to model rotation curves derived from high resolution (spatial and spectra) images of protoplanetary disks. for example, \citet{yen16,yen18} stacking lines to detect faint transitions and measure dynamical masses. Also to probe perturbations to velocity fields to search for the influence of exoplanets \citet{teague18a} and perturbations to the pressure profiles in disks \citet{teague18c}.
+There have been some cool new techniques to model rotation curves derived from high resolution (spatial and spectra) images of protoplanetary disks. For example, \citet{yen16,yen18} have stacked lines to detect faint transitions and measure dynamical masses. Extensions to these techniques have also been used to probe perturbations to velocity fields to search for the influence of exoplanets \citep{teague18a} and perturbations to the pressure profiles in disks \citep{teague18c}.
 
-In this paper, we try to incorporate some ideas inspired by these data-driven techniques into our modus operandi, which is fitting the visibilities directly using the Fourier transform of a sky brightness model. We'll also try to be smart about how we calculate the model visibilities, in such a way that we can also calculate derivatives in order to efficiently use high dimensional optimization and inference schemes.
-
-Because our goal is to make the Fourier part somewhat generic to the parameterization of the sky model, we'll take the following order. First, we'll describe just enough of the sky model to give context to what we mean. Then, we'll develop the mathematical framework to calculate the model visibilities and their derivatives. Finally, we'll circle back and describe a specific implementation for the sky model and discuss how it might be extended.
+In this paper, we try to incorporate some inspirations from these data-driven techniques into our typical modus operandi, which is fitting the visibilities directly using the Fourier transform of a sky brightness model. We'll also try to be smart about how we calculate the model visibilities so that we can also calculate model derivatives in order to efficiently use high dimensional optimization and inference schemes. Because our goal is to make the derivatives part generic to the exact parameterization of the sky model, we'll be explaining things in the following order. First, we'll describe just enough of the sky model in order to give some context. Then, in gory detail we'll develop the mathematical framework to calculate the model visibilities and their derivatives from a generic sky model. Finally, we'll circle back and describe a specific implementation for the sky model and discuss how it might be extended to do cool stuff.
 
 % \begin{figure*}[ht!]
 % \begin{center}
@@ -68,106 +72,165 @@ Because our goal is to make the Fourier part somewhat generic to the parameteriz
 % \end{figure*}
 
 \section{Sky model basics}
-Interferometers like ALMA measure the Fourier transform of the sky brightness, as a function of frequency. Our first task is to describe the sky brightness model, $I(x, y, \nu)$, which is a function of position and frequency. This has units of intensity, or something like Jy/beam or Jy/sterradian. The position $x$, $y$, is directly related to the RA, DEC, based upon the distance to the source, so we end up with a model of $I(l, m, \nu)$, where $l$ is the RA coordinate (in radians) and $m$ is the dec coordinate (in radians). Like RA, $l$ increases towards the east (left) of images.
-
-The model parameters generally break down into two groups, those that are required to describe the morphology of the intensity, and those geometric parameters that describe the rotation or translation of the emission. The second group of parameters can be easily applied in the Fourier domain via the shift and rotation theorems. We'll lump the first group of parameters into $\bbeta$. The second group of parameters includes the RA ($\alpha$) and Dec ($\delta$) offsets, as well as the position angle of the ascending note $\Omega$. Together, we'll call all parameters $\btheta = \left \{ \bbeta, \alpha, \delta, \Omega \right \}$.
+Our first task is to describe the sky brightness model, which is a function of sky position and, for molecular line datasets, also frequency
+\begin{equation}
+    I(\alpha, \delta, \nu) \quad [\mathrm{Jy/beam}].
+\end{equation}
+The sky brightness has units of intensity, which usually means something like Jy/beam or Jy/steradian. R.A. increases towards the east (left). We'll get into this in more detail later, but suppose we have a setup that generates a sky brightness model (i.e., images) corresponding to specific protoplanetary disk parameters. The model parameters generally break down into two groups: those that are required to describe the morphology of the intensity (things like size of the disk, strength of the gravity field, etc\ldots), and those geometric parameters that describe the rigid-body positioning of the brightness model, i.e. translation and rotation. We'll lump the first group of parameters into $\bbeta$. Currently, $\bbeta$ contains about 7 - 10 parameters for simple disk models, though realistically we'd like to jack this up to 20 or more if we can, since current ALMA datasets demand this level of detail. The second group of parameters includes the R.A. ($\delta_\alpha$) and Dec ($\delta_\delta$) offsets of the disk centroid from the phase center of the observations and the position angle of the ascending note $\Omega$; their effects on the model can be easily applied in the Fourier domain via the shift and rotation theorems. Together, we'll call all of the  parameters describing the sky brightness model $\btheta = \left \{ \bbeta, \delta_\alpha, \delta_\delta, \Omega \right \}$. This should be enough information to get started describing how to calculate the model visibilities and their derivatives. We'll come back to describing how to calculate $I(\alpha, \delta, \nu |\, \bbeta)$ in more detail in a later section.  
 
 \section{Calculating visibilities}
-The visibility function $V$ is simply the Fourier transform of the sky brightness distribution
+Interferometers like ALMA measure the Fourier transform of the sky brightness, called the visibility function $V$
 \begin{equation}
-  V(u, v, \nu) \rightleftharpoons I(\alpha, \delta, \nu)
+  V(u, v, \nu) \rightleftharpoons I(\alpha, \delta, \nu).
 \end{equation}
-the $u$ and $v$ coordinates are the \emph{spatial frequencies} and have units of k$\lambda$. In this parameterization, $\alpha$ and $\delta$ are commonly denoted by $l$ and $m$ and have units of radians, rather than arcseconds. The visibility function is a complex valued function. So, going from a 2D ($\times N_\mathrm{chan}$) sky image cube to a corresponding visibility cube is pretty straightforward, and just involves using an FFT algorithm. For terminology's sake, we'll call the output of the FFT the \emph{dense visibility model}, or $\vm_\blacksquare$.
+This function is spanned by the $u$ and $v$ coordinates called \emph{spatial frequencies}. If $\alpha$ and $\delta$ are in units of radians, then $u$ and $v$ have units of $\lambda$, the wavelength of light of the observation.\footnote{Some textbooks also use the direction cosines $l$ and $m$ instead of R.A. and Dec to be more explicit about the radian thing, and there are some technicalities in more complicated imaging situations. For our purposes, these are equivalent, so we'll just use $\alpha$ and $\delta$ to avoid introducing yet more symbols.} The visibility function is complex-valued. A typical measurement set from ALMA consists of discrete measurements of $V$ at many tens of thousands if not hundreds of thousands of $\{ u, v\}_i$ points, across a range of frequencies. We'll call the collection of these measurements $\vd$ the \emph{measurement set}, or simply the \emph{visibilities}.
 
-A typical measurement set from ALMA consists of discrete measurements of $V$ at many tens of thousands of $\{ u, v\}_i$ points. The exact values of the $u_i$ and $v_i$ will usually not correspond exactly to the grid points of the $u$ and $v$ values in the dense visibility model, and so some interpolation scheme is required to generate \emph{model visibilities} $V(u_i, v_i)$. Crucially, and perhaps obviously, the maximum $u$ and $v$ in the dense visibility model must be larger than the largest $\{ u, v\}_i$ in the measurement set.
+Although there are some interesting projects to make models directly in the Fourier domain, for now we're going to stick with creating a discrete sky brightness model in the image domain (i.e., a 256 $\times$ 256 $\times N_\mathrm{chan}$ image cube, frequently called the ``channel maps'') and then using the FFT to calculate discrete samples in the Fourier domain. For the sake of getting everything down in math, we'll start by treating a single frequency channel at a time. 
+
+To make the appeal to signal processing explicit, we will call an actual image array $\im$, which is a sampling of the continuous image $I(\alpha, \delta)$ at specific $\left \{\alpha, \delta \right \}_i$ pixels. We can represent this as 
+\begin{equation}
+    \im = \Sha(\alpha/\Delta \alpha, \delta / \Delta \delta) \cdot I(\alpha, \delta)
+\end{equation}
+where $\Delta \alpha$ and $\Delta \delta$ are the sizes of the pixels in radians, and $\Sha$ is Bracewell's Sha function\footnote{You see why the choice of $\alpha$ and $\delta$ for R.A. and Dec is not totally ideal here, but hopefully it's clear where I mean declination and where I mean a $\delta$-function.}
+\begin{equation}
+    \Sha(\alpha/\Delta \alpha, \delta / \Delta \delta)  = \sum_j^\infty \sum_k^\infty \delta(j - \alpha/\Delta \alpha, k - \delta/\Delta \delta).
+\end{equation}
+For terminology's sake, we'll call the output of the FFT the \emph{dense visibility model}, or $\vm_\blacksquare$
+\begin{equation}
+    \vm_\blacksquare = \mathfrak{F} \im.
+\end{equation}
+The Fourier transform of the Sha function is itself, so, via the similarity Fourier theorem,
+\begin{equation}
+    \Sha(\alpha/\Delta \alpha, \delta / \Delta \delta) \rightleftharpoons \Delta \alpha \Delta \delta \Sha(\Delta \alpha u, \Delta \delta v).
+\end{equation}
+We also have 
+\begin{equation}
+    \vm_\blacksquare = \Delta \alpha \Delta \delta \Sha(\Delta \alpha u, \Delta \delta v) \cdot V(u, v).
+\end{equation}
+In order to create a set of \emph{model visibilities} $\vm$ corresponding to the exact values of $\{ u, v\}_i$ in the dataset, we'll need to do some sort of interpolation from the regularly spaced samples in $\vm_\blacksquare$. 
 
 \subsection{Interpolation schemes}
-While in theory one could just go ahead with a nearest neighbor or linear interpolation scheme to go from $\vm_\blacksquare$ to $\vm$, this isn't the wisest thing to do. That's because any interpolation scheme with finite support will affect the signal that we have sampled. Sort of, e.g., we can't do full sinc interpolation. But, radio astronomers like to write down the interpolation as the convolution with a prolate spheroidal wavefunction, as best described in \citep{schwab84}. Modern packages use this implementation, and so we'll describe what happens.
+While in theory one could just use a bilinear interpolation scheme to go from $\vm_\blacksquare$ to $\vm$, this isn't the wisest thing to do. That's because any interpolation scheme with finite support will in some way affect the signal that we have sampled, and we want to control these influences as best we can. The accepted best practice among radio astronomers is to write the interpolation as the convolution of the discrete $\vm_\blacksquare$ with a prolate spheroidal wavefunction $C$, so as to form a continuous function, which is then resampled at the $\{ u, v\}_i$ points corresponding to $\vd$. This is described in detail in \citet[ch 7.3,][]{synthesis99} and \citet{schwab84}, but from the inverse perspective of putting irregularly spaced samples \emph{back onto} a regularly spaced grid to do an FFT and get an image. We've always implemented this as a pretty basic \texttt{for} loop in our codes, but let's try to write this in matrix form because that should help clarify how $\vm$ is linear w.r.t to $I$ (I think it is) and how we're going to take derivatives.
 
-First, the image is multiplied by a window function to taper support. We summarize the picture graphically in 1D. Then, the sampling occurs as the multiplication.
-
-E.g., can we write the entire process that generates $\vm$ from $I$ as a series of matrix multiplications? I think so, it should be entirely linear.
+Let the sampling function $S$ be a bunch of $\delta$-functions at the locations of the $\{ u, v\}_i$ points in the dataset (not regularly spaced),
 \begin{equation}
-  \vm = \boldsymbol{S} \mathcal{F} \{ T \times I\}
+    S(u,v) = \sum_i^N \delta(u - u_i, v - v_i)
 \end{equation}
-where $\mathcal{F}$ represents the Fourier transform operator. Notably the taper window $T$ just premultiplies the image, this is not a matrix product.
+where $N$ is the number of visibilities in the dataset. To generate $\vm$, we could imagine doing the following 
+\begin{eqnarray}
+    \vm &=& [\mathfrak{F} \im * C] \cdot S \quad \mathrm{\color{red}{WRONG}} \label{eqn:wrong-conv}\\
+    \vm &=& [\vm_\blacksquare * C] \cdot S \quad \mathrm{\color{red}{WRONG}}
+\end{eqnarray}
+where $C$ is some convolutional kernel with finite support and $*$ is the convolution operator. However, if we rearrange things using the Fourier convolution/multiplication theorem, then this is equivalent to 
+\begin{eqnarray}
+\vm &=& \mathfrak{F}[\im \cdot \mathfrak{F}C] \cdot S \quad \mathrm{\color{red}{WRONG}}\\
+\vm &=& \mathfrak{F}[\im \cdot c] \cdot S \quad \mathrm{\color{red}{WRONG}}
+\end{eqnarray}
+and we see that the choice of convolution kernel $C$ is leaving some effect $c$ on the original signal in our image, where $c \rightleftharpoons C$. To remedy this, we can pre-divide the image by $c$ in order to achieve an unaffected image at the end. Let's write the pre-division of the image as 
+\begin{equation}
+    \im^c = \im \circ \frac{1}{\ct}.
+\end{equation}
+where we use the $\circ$ symbol to signify element-by-element array multiplication, also called an entrywise product, Hadamard product, or Schur product. This leads to 
+\begin{eqnarray}
+\vm &=& \mathfrak{F} \left [ \im^c \cdot \mathfrak{F}C \right ] \cdot S \\
+\vm &=& \mathfrak{F}\left [\frac{\im}{c} \cdot c \right ] \cdot S \\
+\vm &=& \mathfrak{F} \im \cdot S \quad \mathrm{\color{green}{CORRECT}}.
+\end{eqnarray}
+Therefore, as opposed to Eqn~\ref{eqn:wrong-conv}, the convolution and sampling operation we actually want to carry out is 
+\begin{equation}
+    \vm = [\mathfrak{F} \im^c * C] \cdot S \quad \mathrm{\color{green}{CORRECT}}
+\end{equation}
 
-Synthesis Imaging, chapter 16 has a good section.
+Now that we've covered the basics of the signal processing, let's write the generation of $\vm$ from $\im$ in true matrix form. To make the calculation of $C$ and $c$ explicit, we'll first need to define the prolate spheroidal function $\psi(\eta)$.\footnote{There are many variant forms of $\psi$ depending on how many nearest neighbor gridpoints we'd like to include (the support size $m$) and how concentrated we'd like the peak to be (the exponent $\alpha$), but the standard one employed by radio astronomers seems to be the spheroid with $m = 6$ and $\alpha = 1$, so from here on assume that we're referring to that function so that we can drop the extra subscripts. If you're interested in a different kernel choice, all of the necessary detail is in \citet{schwab84}.} This function is usually implemented via a polynomial approximation like many other special functions, which we'll describe in the appendix. For a mental picture, it's essentially like a Gaussian taper from 1 to 0 over the domain [0,1]. We'll use it to create a two dimensional kernel that convolves over a $6 \times 6$ subgrid of points within $\vm_\blacksquare$.
+
+The two dimensional convolution kernel is separable, so we have $C(u,v) = C_1(u)C_2(v)$. The one dimensional convolutional kernel is 
+\begin{equation}
+    C(\eta) = |1 - \eta^2| \psi(\eta).
+\end{equation}
+where $\eta(u) = \frac{u}{3 \Delta u}$, $\eta(v) = \frac{v}{3 \Delta v}$; and $\Delta u$ and $\Delta v$ are the spacings between points in $\vm_\blacksquare$. These spacings are determined by the size of $\im$ and the spacings in $\Delta \alpha$ and $\Delta \delta$. If the image size is $N_\alpha \times N_\delta$, then
+\begin{eqnarray}
+    \Delta u &= \frac{1}{N_\alpha \Delta \alpha}\\
+    \Delta v &= \frac{1}{N_\delta \Delta \delta}.
+\end{eqnarray}
+For completeness, the full two dimensional kernel is
+\begin{equation}
+    C(u,v) = |1 - \eta(u)^2| |1 - \eta(v)^2| \psi(\eta(u)) \psi(\eta(v)) 
+\end{equation}
+The one dimensional taper in the map plane is simply 
+\begin{equation}
+    c(\eta) = \psi(\eta)
+\end{equation}
+where $\eta(\alpha) = 2 \alpha \Delta u$ and  $\eta(\delta) = 2 \delta \Delta v$, e.g., $\eta$ is 0 in the center of the image and 1 at the edges. As noted by \citet{synthesis99}, $\psi$ is a ``finite Fourier self-transform,'' which means if you truncate it to the window [-1,1], normalize it appropriately, and Fourier transform it, you get back $\psi$. For completeness, the full map plane taper is 
+\begin{equation}
+    c(\alpha, \delta) = \psi(\eta(\alpha)) \psi(\eta(\delta)).
+\end{equation}
+Calculating the map plane taper $\ct$ is a one-time operation set by the pixel sizes and image extent. 
+
+Now, let's write the FFT of the taper-corrected image as 
+\begin{equation}
+    \vm^c = \mathfrak{F} \im^c
+\end{equation}
+To make the interpolation/convolution process a bit more tractable, let's think about interpolating $\vm^c_\blacksquare$ to a single $\{u, v\}_i$ point. This is done by evaluating $C(u, v)$ at all of the gridpoints that fall within the finite support, multiplying them by the value of $\mathcal{W}^c_{\blacksquare jk}$ at that gridpoint, summing them, and then dividing by the normalization. Our choice of kernel and the fact that we're on a regular grid, means that this operation will always involve the 36 nearest gridpoints
+\begin{equation}
+    V(u_i, v_i) = \frac{\sum_j^6 \sum_k^6 C(u_j - u_i, v_k - v_i) \mathcal{W}^c_{\blacksquare jk}}{\sum_j^6 \sum_k^6 C(u_j - u_i, v_k - v_i)}.
+\end{equation}
+Thankfully, because neither the $u$ and $v$ points in the dense visibility model nor the $\{u,v\}_i$ points in the measurement set change with model parameters, calculating the convolutional prefactors is also a one-time process. We can also precalculate the denominator $w_i = \sum_j^6 \sum_k^6 C(u_j - u_i, v_k - v_i)$ and turn this into a single loop
+\begin{equation}
+ V(u_i, v_i) = \sum_l^{36} C(u_l - u_i, v_l - v_i) \mathcal{W}^c_{\blacksquare l} / w_i.
+ \end{equation}
+ where the index $l$ covers all of the combinations previously in the double sum over $\{j, k\}$. 
+ 
+ Next up is writing this operation using a convolutional matrix products. Technically, $\vm^c_\blacksquare$ doesn't need to be in a 2D matrix format, so to make the matrix math work, we can ravel it into a vector with length ($N_\alpha \times N_\delta$, 1), which we'll call $\hat{\vm_\blacksquare^c}$. We'll call the row vector of pre-evalutions of the kernel $\hat{\boldsymbol{C}}_i = C(u_l - u_i, v_l - v_i) / w_i$, which has shape (1, $N_\alpha \times N_\delta$). Most of the columns of this vector will be $0$, except those 36 nearest to the point $u_i, v_i$. Then, we can write $V(u_i, v_i)$ as a matrix product
+ \begin{equation}
+     V(u_i, v_i) = \hat{\boldsymbol{C}}_i \hat{\vm_\blacksquare^c}.
+ \end{equation}
+ To get the full measurement set, we need to construct a $\hat{\boldsymbol{C}}$ with size ($N_\mathrm{vis}$, $N_\alpha \times N_\delta$), filled with the proper kernel pre-evaluations corresponding to each $\{u,v\}_i$ point in the measurement set. As you might imagine, $\hat{\boldsymbol{C}}$ will be a very sparse matrix. Then we have
+  \begin{equation}
+     \vm = \hat{\boldsymbol{C}} \hat{\vm_\blacksquare^c}.
+ \end{equation}
 
 \subsection{Transforming visibilities with theorems}
-The position offsets from the phase center of the observations, $\alpha$ and $\delta$, transform the model visibilities ${\bm M}({\bm \theta})$ in straightforward, analytical ways. Rather than undergoing the full radiative transfer calculations to synthesize image plane models with these offsets, instead we can synthesize centered channel maps ($\delta_\alpha, \delta_\delta=0$) and use Fourier relationships to quickly modify the visibilities.
-The two dimensional shift theorem says that an offset in the image plane results in a phase shift in the Fourier plane \citep{bracewell00}
+The position offsets from the phase center of the observations, $\alpha$ and $\delta$, transform the model visibilities in straightforward, analytic ways. The two dimensional shift theorem says that a translational offset in the image plane results in a phase shift in the Fourier plane \citep{bracewell00}
 \begin{equation}
-I(\alpha - \delta_\alpha, \delta - \delta_\delta) \rightleftharpoons \exp \left \{ -2 \pi i (\delta_\alpha u + \delta_\delta v) \right \} {\bm M}(u,v).
+I(\alpha - \delta_\alpha, \delta - \delta_\delta) \rightleftharpoons \exp \left \{ -2 \pi \imath (\delta_\alpha u + \delta_\delta v) \right \} V(u, v).
 \end{equation}
-This means that every model visibility $M_i$ is phase-shifted by an amount that depends on its spatial frequencies $\{u_i, v_i\}$.
-Since $\delta_\alpha$ and $\delta_\delta$ are ``nuisance parameters'' dependent on the calibration of the interferometric observations, we numerically marginalize the posterior probability distribution over them for each proposal of the remaining subset of parameters.
-As before, let ${\bm \theta}$ equal the full set of parameters specified in \S\ref{subsec:interferometry}, and let
-${\bm \theta}_r$ represent the subset of these parameters that excludes $\delta_\alpha$ and $\delta_\delta$. The  marginalized posterior distribution is given by the following double integral
-\begin{equation}
-p({\bm \theta}_r |\,{\bm D}) = \iint p({\bm \theta} |\,{\bm D}) \;\mathrm{d}\delta_\alpha\,\mathrm{d}\delta_\delta.
-\label{eqn:integral}
-\end{equation}
-The range of this integral is set by the bounds of the prior distributions on $\delta_\alpha$ and $\delta_\delta$. From visual inspection of the channel maps of the dataset (e.g., see DM~Tau in Figure~\ref{fig:DMTau}), we can reliably determine the centroid of the disk emission to within 2\arcsec\ of the phase center. Therefore, we set flat ``tophat'' priors 2\arcsec\ in width centered on our estimates of the centroid. The two dimensional integral is performed via adaptive Gaussian cubature.\footnote{Implemented in \url{https://github.com/stevengj/HCubature.jl}, following \citet{genz80}}
+This means that every model visibility is phase-shifted by an amount that depends on its spatial frequencies $\{u_i, v_i\}$. Because of the $\exp$, this is a non-linear operation, but simple to implement.
 
-If posterior distributions of $\delta_\alpha$ and $\delta_\delta$ are needed, for example to produce model and residual channel map figures as in Figure~\ref{fig:DMTau}, they can be easily approximated by the following procedure. From the collection of converged MCMC samples of $\{ {\bm \theta}_r\}$, randomly choose a single sample, denoted $\bar{{\bm \theta}_r}$. Using these parameters, initialize a disk structure, synthesize channel maps, and calculate model visibilities ${\bm M}(\bar{{\bm \theta}_r})$.
-Use the same set of priors and likelihood function (Equation~\ref{eqn:likelihood}) to create a posterior probability function for $p(\delta_\alpha, \delta_\delta | {\bm D}, \bar{{\bm \theta}_r})$, which is functionally equivalent to the previous posterior distribution, but will only be sampled in $\delta_\alpha$ and $\delta_\delta$ \emph{conditional} on the value of $\bar{{\bm \theta}_r}$. This reduced posterior can be quickly explored via grid search or MCMC.
-Although the resulting posteriors will not be exactly equivalent to those that would have been sampled as part of the full parameter space ${\bm \theta}$, given the usually tight constraints on ${\bm \theta}_r$, a single estimate of $\bar{{\bm \theta}_r}$ is sufficiently accurate for the purposes of generating model and residual channel maps. If a more accurate approximation is desired, additional choices of $\bar{{\bm \theta}_r}$ can be drawn from $\{ {\bm \theta}_r\}$ and the process repeated.
-
-In principle, a similar marginalization procedure could also be applied to position angle (PA), since a rotation in the image plane is equivalent to a rotation in the Fourier plane \citep{bracewell00}. However, since this operation requires resampling the visibility array at the rotated spatial frequencies, it must be done using the full output from the FFT of the sky plane, rather than visibilities which have already been interpolated to the dataset baselines.
-This requirement on the order of operations means that the marginalization over $\delta_\alpha$ and $\delta_\delta$ must occur at every step $\mathrm{d}\mathrm{PA}$ of the PA marginalization, making the numerical integration considerably more expensive. Since the computational cost of the Affine-Invariant MCMC algorithm (and of Metropolis-Hastings algorithms in general) scales linearly with dimensionality \citep{dunkley05,allison14}, to be worthwhile, an evaluation of the numerically marginalized posterior must take no more than $D/(D - 1)$ times longer than an evaluation of the original posterior, where $D$ is the dimensionality of the original problem. For the ray-tracing costs considered here, this holds true for $\delta_\alpha$ and $\delta_\delta$, but not for PA.
-
-
-If the sky image is rotated by an angle PA such that the positions $\alpha$ and $\delta$ become
+If the sky image is rotated by an angle $\Omega$ such that the positions $\alpha$ and $\delta$ become
 \begin{eqnarray}
-\alpha^\prime = \alpha \cos \mathrm{PA} - \delta \sin \mathrm{PA} \\
-\delta^\prime = \alpha \sin \mathrm{PA} + \delta \cos \mathrm{PA}
+\alpha^\prime = \alpha \cos \Omega - \delta \sin \Omega \\
+\delta^\prime = \alpha \sin \Omega + \delta \cos \Omega
 \end{eqnarray}
 then its Fourier transform is rotated by the same angle and in the same sense \citep{bracewell00}
 \begin{eqnarray}
-u^\prime = u \cos \mathrm{PA} - v \sin \mathrm{PA} \\
-v^\prime = u \sin \mathrm{PA} + v \cos \mathrm{PA}.
+u^\prime = u \cos \Omega - v \sin \Omega \\
+v^\prime = u \sin \Omega + v \cos \Omega.
 \end{eqnarray}
-Since this operation requires resampling the visibility array at the rotated spatial frequencies, it must be done using the full output from the FFT of the sky plane, rather than visibilities which have already been interpolated to the dataset baselines.
-
+Since this operation requires resampling the visibility array at the rotated spatial frequencies, unlike the translational offset, it must be done using $\vm_\blacksquare$ rather than $\vm$. This operation involves recalculating $\hat{\boldsymbol{C}}$. So, unfortunately neither the translational offsets nor the rotation are simple linear operations applied to the model visibilities, but they are useful to keep in mind because it means we can make these changes in the Fourier domain without needing to redo the FFT or recalculate $I$.
 
 \subsection{Likelihood Calculation}
 
-Define our visibility data as $\boldsymbol{\mathcal{V}}$.
-Define our visibility model as $\boldsymbol{\mathcal{W}}(\boldsymbol{\theta})$.
-
-Typically done as
+With model visibilities in hand, we can calculate the likelihood of the dataset via
 \begin{equation}
-    {\cal L}(\boldsymbol{\theta}) = {\cal N}(\boldsymbol{\mathcal{V}} |\, \boldsymbol{\mathcal{W}}(\boldsymbol{\theta}), \boldsymbol{C})
+    {\cal L}(\vd |\, \boldsymbol{\theta}) = {\cal N}(\boldsymbol{\mathcal{V}} |\, \boldsymbol{\mathcal{W}}(\boldsymbol{\theta}), \boldsymbol{\Sigma}).
 \end{equation}
 Typically we just treat the visibilities as independent measurements, and so we have a simple $\chi^2$ likelihood of
 \begin{equation}
     \ln {\cal L}(\btheta) = - \frac{1}{2} \sum_i^N \frac{|\vd - \vm(\btheta)|^2}{\sigma_i^2}.
 \end{equation}
-Note that the likelihood is a scalar quantity. Next, we want to calculate the derivative of the likelihood
+Note that the likelihood is a scalar quantity. Next, we want to calculate the gradient of the likelihood with respect to the model parameters,
 \begin{equation}
-    \frac{\mathrm{d}\mathcal{L}(\btheta)}{\mathrm{d}\btheta}.
+    \nabla \mathcal{L}
 \end{equation}
-The main image is $I(x,y,\nu)$. The 2D Fourier transform (FT) of this image is
-\begin{equation}
-    V(u,v,\nu) = \mathcal{F}(I).
-\end{equation}
-We're assuming that each frequency channel of the channel maps are independent. Baseline-dependent phase errors may make this less true. See \citet{hezaveh13} for the proper way to bake these into the inference loop, if we so desire, but we will just ignore them for now.
+which I assume will involve calculating the partial derivatives of $\vm$ with respect to the components $\btheta$. \todo{DFM: Is this right? Should I start calculating these by hand or is there something smart I can do with code? How about the derivative of the FFT part? Can I leave this to Theano?}
 
-Real $\Re$ and imaginary $\Im$ and $\imath$.
+% \section{Extra stuff}
+% Baseline-dependent phase errors may make this less true. See \citet{hezaveh13} for the proper way to bake these into the inference loop, if we so desire, but we will just ignore them for now.
 
-DFM points out that, in theory, we can also create disk code that can deliver us a derivative of the likelihood function. This is great, because we can feed this into techniques like Hamiltonian Monte Carlo and access a much larger set of parameter space. We are going to need this, I think, if we actually want disk models that are realistic.
+% Crucially, and perhaps obviously, the maximum $u$ and $v$ in the dense visibility model must be larger than the largest $\{ u, v\}_i$ in the measurement set.
 
-The idea is to start writing the change in derivative with respect to the interpolated visibilities.
-
-Then, we probably need to write down the change in interpolated visibility. Due to the FFT, though, this is going to require a knowing the changes of all of the other pixels.
-
-If we can reduce this to knowing the change in a single pixel, then that change in intensity, with respect to the parameters, is possible to compute.
-
-It may be possible to introduce correction to the phase errors, as well.
-
-\section{Modeling the radial intensity profile}
-How smooth is the radial profile, and can we use a Nuker profile to model it?
+% \section{Modeling the radial intensity profile}
+% How smooth is the radial profile, and can we use a Nuker profile to model it?
 
 
 \acknowledgments
