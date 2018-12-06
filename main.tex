@@ -170,7 +170,7 @@ Now, let's write the FFT of the taper-corrected image as
 \begin{equation}
     \vm^c = \mathfrak{F} \im^c
 \end{equation}
-To make the interpolation/convolution process a bit more tractable, let's think about interpolating $\vm^c_\blacksquare$ to a single $\{u, v\}_i$ point. This is done by evaluating $C(u, v)$ at all of the gridpoints that fall within the finite support, multiplying them by the value of $\mathcal{W}^c_{\blacksquare jk}$ at that gridpoint, summing them, and then dividing by the normalization. Our choice of kernel and the fact that we're on a regular grid, means that this operation will always involve the 36 nearest gridpoints
+To make the interpolation/convolution process a bit more tractable, let's think about interpolating $\vm^c_\blacksquare$ to a single $\{u, v\}_i$ point. This is done by evaluating $C(u, v)$ at all of the gridpoints that fall within the finite support, multiplying them by the value of $\mathcal{W}^c_{\blacksquare jk}$ at that gridpoint, summing them, and then dividing by the normalization. Our choice of kernel and the fact that we're on a regular grid means that this operation will always involve the 36 nearest gridpoints
 \begin{equation}
     V(u_i, v_i) = \frac{\sum_j^6 \sum_k^6 C(u_j - u_i, v_k - v_i) \mathcal{W}^c_{\blacksquare jk}}{\sum_j^6 \sum_k^6 C(u_j - u_i, v_k - v_i)}.
 \end{equation}
@@ -180,7 +180,7 @@ Thankfully, because neither the $u$ and $v$ points in the dense visibility model
  \end{equation}
  where the index $l$ covers all of the combinations previously in the double sum over $\{j, k\}$. 
  
- Next up is writing this operation using a convolutional matrix products. Technically, $\vm^c_\blacksquare$ doesn't need to be in a 2D matrix format, so to make the matrix math work, we can ravel it into a vector with length ($N_\alpha \times N_\delta$, 1), which we'll call $\hat{\vm_\blacksquare^c}$. We'll call the row vector of pre-evalutions of the kernel $\hat{\boldsymbol{C}}_i = C(u_l - u_i, v_l - v_i) / w_i$, which has shape (1, $N_\alpha \times N_\delta$). Most of the columns of this vector will be $0$, except those 36 nearest to the point $u_i, v_i$. Then, we can write $V(u_i, v_i)$ as a matrix product
+ Next up is writing this operation using as convolutional matrix. Technically, $\vm^c_\blacksquare$ doesn't need to be in a 2D matrix format, so to make the matrix math work, we can ravel it into a vector with length ($N_\alpha \times N_\delta$, 1), which we'll call $\hat{\vm_\blacksquare^c}$. We'll call the row vector of pre-evalutions of the kernel $\hat{\boldsymbol{C}}_i = C(u_l - u_i, v_l - v_i) / w_i$, which has shape (1, $N_\alpha \times N_\delta$). Most of the columns of this vector will be $0$, except those 36 nearest to the point $u_i, v_i$. Then, we can write $V(u_i, v_i)$ as a matrix product
  \begin{equation}
      V(u_i, v_i) = \hat{\boldsymbol{C}}_i \hat{\vm_\blacksquare^c}.
  \end{equation}
@@ -190,7 +190,7 @@ Thankfully, because neither the $u$ and $v$ points in the dense visibility model
  \end{equation}
 
 \subsection{Transforming visibilities with theorems}
-The position offsets from the phase center of the observations, $\alpha$ and $\delta$, transform the model visibilities in straightforward, analytic ways. The two dimensional shift theorem says that a translational offset in the image plane results in a phase shift in the Fourier plane \citep{bracewell00}
+The position offsets from the phase center of the observations, $\delta_\alpha$ and $\delta_\delta$, transform the model visibilities in straightforward, analytic ways. The two dimensional shift theorem says that a translational offset in the image plane results in a phase shift in the Fourier plane \citep{bracewell00}
 \begin{equation}
 I(\alpha - \delta_\alpha, \delta - \delta_\delta) \rightleftharpoons \exp \left \{ -2 \pi \imath (\delta_\alpha u + \delta_\delta v) \right \} V(u, v).
 \end{equation}
@@ -206,7 +206,7 @@ then its Fourier transform is rotated by the same angle and in the same sense \c
 u^\prime = u \cos \Omega - v \sin \Omega \\
 v^\prime = u \sin \Omega + v \cos \Omega.
 \end{eqnarray}
-Since this operation requires resampling the visibility array at the rotated spatial frequencies, unlike the translational offset, it must be done using $\vm_\blacksquare$ rather than $\vm$. This operation involves recalculating $\hat{\boldsymbol{C}}$. So, unfortunately neither the translational offsets nor the rotation are simple linear operations applied to the model visibilities, but they are useful to keep in mind because it means we can make these changes in the Fourier domain without needing to redo the FFT or recalculate $I$.
+Since this operation requires resampling the visibility array at the rotated spatial frequencies, unlike the translational offset, it must be done using $\vm_\blacksquare$ rather than $\vm$. This operation involves recalculating $\hat{\boldsymbol{C}}$. So, unfortunately neither the translational offsets nor the rotation are simple linear operations applied to the model visibilities, but they are useful to keep in mind because it means we can make these model changes in the Fourier domain without needing to recalculate $\im$ or even redo the FFT that delivers $\vm_\blacksquare$.
 
 \subsection{Likelihood Calculation}
 
@@ -214,7 +214,7 @@ With model visibilities in hand, we can calculate the likelihood of the dataset 
 \begin{equation}
     {\cal L}(\vd |\, \boldsymbol{\theta}) = {\cal N}(\boldsymbol{\mathcal{V}} |\, \boldsymbol{\mathcal{W}}(\boldsymbol{\theta}), \boldsymbol{\Sigma}).
 \end{equation}
-Typically we just treat the visibilities as independent measurements, and so we have a simple $\chi^2$ likelihood of
+Typically we just treat the visibilities as independent measurements ($\boldsymbol{\Sigma}$ is diagonal), and so we have a simple $\chi^2$ likelihood of
 \begin{equation}
     \ln {\cal L}(\btheta) = - \frac{1}{2} \sum_i^N \frac{|\vd - \vm(\btheta)|^2}{\sigma_i^2}.
 \end{equation}
