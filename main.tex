@@ -198,13 +198,13 @@ This means that every model visibility is phase-shifted by an amount that depend
 
 If the sky image is rotated by an angle $\Omega$ such that the positions $\alpha$ and $\delta$ become
 \begin{eqnarray}
-\alpha^\prime = \alpha \cos \Omega - \delta \sin \Omega \\
-\delta^\prime = \alpha \sin \Omega + \delta \cos \Omega
+\alpha^\prime = \alpha \cos \Omega - \delta \sin \Omega \label{eqn:rota}\\
+\delta^\prime = \alpha \sin \Omega + \delta \cos \Omega \label{eqn:rotd}
 \end{eqnarray}
 then its Fourier transform is rotated by the same angle and in the same sense \citep{bracewell00}
 \begin{eqnarray}
-u^\prime = u \cos \Omega - v \sin \Omega \\
-v^\prime = u \sin \Omega + v \cos \Omega.
+u^\prime = u \cos \Omega - v \sin \Omega \label{eqn:rotu}\\
+v^\prime = u \sin \Omega + v \cos \Omega. \label{eqn:rotv}
 \end{eqnarray}
 Since this operation requires resampling the visibility array at the rotated spatial frequencies, unlike the translational offset, it must be done using $\vm_\blacksquare$ rather than $\vm$. This operation involves recalculating $\hat{\boldsymbol{C}}$. So, unfortunately neither the translational offsets nor the rotation are simple linear operations applied to the model visibilities, but they are useful to keep in mind because it means we can make these model changes in the Fourier domain without needing to recalculate $\im$ or even redo the FFT that delivers $\vm_\blacksquare$.
 
@@ -227,7 +227,16 @@ which I assume will involve calculating the partial derivatives of $\vm$ with re
 I think the idea is that we'll need to implement this math as \texttt{Theano} operations, and if there is something we need that \texttt{Theano} doesn't have, we'll need to implement this ourselves in \texttt{C++}.
 
 \section{Toy sky model}
-So, let's try to implement this in \texttt{Theano} starting with an analytic function for sky brightness and see if we can get \texttt{PyMC3} hooked up properly. Then we can move to more exciting sky brightness profiles. The simplest sky model I can think of is a Gaussian, since its Fourier transform is also a Gaussian. To make things more interesting (and hopefully catch edge-cases in the implementation), let's implement an elliptical shape, rotation, and phase-center offset. 
+So, let's try to implement this in \texttt{Theano} starting with an analytic function for sky brightness and see if we can get \texttt{PyMC3} hooked up properly. Then we can move to more exciting sky brightness profiles. The simplest sky model I can think of is a Gaussian, since its Fourier transform is also a Gaussian. To keep things simple for now, we'll just consider a single channel. To make things more interesting (and hopefully catch edge-cases in the implementation), let's implement an elliptical shape, rotation, and phase-center offset. In this case, $\bbeta = \{a, \sigma_x, \sigma_y, \Omega, \delta_\alpha, \delta_\delta \}$, where $a$ is the peak amplitude of the Gaussian in the image domain and $\sigma_x$ and $\sigma_y$ are the semi-major axes of the Gaussian in the R.A. and Dec directions, respectively. We'll define the rotated coordinates according to Equations~\ref{eqn:rota}, \ref{eqn:rotd}, \ref{eqn:rotu}, and \ref{eqn:rotv}, where a positive $\Omega$ means that the Gaussian is rotated towards east of north (counter-clockwise in the sky plane). If the sky-plane model\footnote{Remember that $\alpha$, $\delta$, $\delta_\alpha$, and $\delta_\delta$ are in radians and $u$ and $v$ are in wavelengths.} is
+\begin{equation}
+    I(\alpha, \delta |\, \bbeta) = a \exp \left [ - \left \{  \frac{(\alpha^\prime - \delta_\alpha)^2}{2 \sigma_\alpha^2} + \frac{(\delta^\prime - \delta_\delta)^2}{2 \sigma_\delta^2} \right \} \right ]
+\end{equation}
+then the model visibility function is
+\begin{equation}
+    V(u, v |\, \bbeta) = a e^{- 2 \pi \imath (\delta_\alpha u^\prime + \delta_\alpha v^\prime)} \exp \left [ -2 (\sigma_\alpha^2 u^{\prime 2} + \sigma_\delta^2 v^{\prime 2}) \right ].
+\end{equation}
+
+In our implementation, we'll calculate $\vm$ as if we didn't know there were an analytic solution for $V$ (i.e., going through the FFT and convolutional sampling operations), and then we'll check to make sure it's the same in the end.
 
 % \section{Extra stuff}
 % Baseline-dependent phase errors may make this less true. See \citet{hezaveh13} for the proper way to bake these into the inference loop, if we so desire, but we will just ignore them for now.
