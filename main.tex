@@ -222,7 +222,12 @@ Note that the likelihood is a scalar quantity. Next, we want to calculate the gr
 \begin{equation}
     \nabla \mathcal{L}
 \end{equation}
-which I assume will involve calculating the partial derivatives of $\vm$ with respect to the components $\btheta$. \todo{DFM: Is this right? Should I start calculating these by hand or is there something smart I can do with code? How about the derivative of the FFT part? Can I leave this to Theano?}
+which I assume will involve calculating the partial derivatives of $\vm$ with respect to the components $\btheta$. 
+
+I think the idea is that we'll need to implement this math as \texttt{Theano} operations, and if there is something we need that \texttt{Theano} doesn't have, we'll need to implement this ourselves in \texttt{C++}.
+
+\section{Toy sky model}
+So, let's try to implement this in \texttt{Theano} starting with an analytic function for sky brightness and see if we can get \texttt{PyMC3} hooked up properly. Then we can move to more exciting sky brightness profiles. The simplest sky model I can think of is a Gaussian, since its Fourier transform is also a Gaussian. To make things more interesting (and hopefully catch edge-cases in the implementation), let's implement an elliptical shape, rotation, and phase-center offset. 
 
 % \section{Extra stuff}
 % Baseline-dependent phase errors may make this less true. See \citet{hezaveh13} for the proper way to bake these into the inference loop, if we so desire, but we will just ignore them for now.
