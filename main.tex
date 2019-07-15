@@ -19,6 +19,8 @@
 \newcommand{\thirteen}{${}^{13}$CO}
 \newcommand{\eighteen}{C${}^{18}$O}
 
+\newcommand{\theano}{\texttt{Theano}}
+
 \newcommand{\im}{\boldsymbol{I}_\blacksquare}
 \newcommand{\vd}{\boldsymbol{\mathcal{V}}} % visibility data
 \newcommand{\vm}{\boldsymbol{\mathcal{W}}} % visibility model
@@ -52,7 +54,7 @@
 
 
 \begin{abstract}
-Fast computation of protoplanetary disk models of molecular gas emission. With likelihood gradients (we hope).
+We implement computationally efficient models for sub-mm observations of protoplanetary disks targeting the dust continuum and molecular gas transitions. We utilize autogradient frameworks to enable fast computation of the posterior distribution to be used by Hamiltonian Monte Carlo algorithms. The hope is that such a framework will enable the development of more realistic models (requiring $\gtrsim 20$ parameters) to fit the most spectacular ALMA data.
 \end{abstract}
 
 \keywords{protoplanetary disks -- stars: pre-main sequence}
@@ -61,7 +63,7 @@ Fast computation of protoplanetary disk models of molecular gas emission. With l
 
 There have been some cool new techniques to model rotation curves derived from high resolution (spatial and spectra) images of protoplanetary disks. For example, \citet{yen16,yen18} have stacked lines to detect faint transitions and measure dynamical masses. Extensions to these techniques have also been used to probe perturbations to velocity fields to search for the influence of exoplanets \citep{teague18a} and perturbations to the pressure profiles in disks \citep{teague18c}.
 
-In this paper, we try to incorporate some inspirations from these data-driven techniques into our typical modus operandi, which is fitting the visibilities directly using the Fourier transform of a sky brightness model. We'll also try to be smart about how we calculate the model visibilities so that we can also calculate model derivatives in order to efficiently use high dimensional optimization and inference schemes. Because our goal is to make the derivatives part generic to the exact parameterization of the sky model, we'll be explaining things in the following order. First, we'll describe just enough of the sky model in order to give some context. Then, in gory detail we'll develop the mathematical framework to calculate the model visibilities and their derivatives from a generic sky model. Finally, we'll circle back and describe a specific implementation for the sky model and discuss how it might be extended to do cool stuff.
+In this paper, we try to incorporate some inspirations from these data-driven techniques into our typical modus operandi, which is fitting the visibilities directly using the Fourier transform of a sky brightness model. We'll also try to be smart about how we calculate the model visibilities so that we can also calculate model derivatives in order to efficiently use high dimensional optimization and inference schemes. Because our goal is to make the derivatives part generic to the exact parameterization of the sky model, we'll be explaining things in the following order. First, we'll describe just enough of the sky model in order to give some context. Then, in gory detail we'll develop the mathematical framework to calculate the model visibilities from a generic sky model. We will implement this full chain of calculations using a specialty programming language that automatically calculates gradients (for now this is \texttt{Theano}, but could be \texttt{TensorFlow}). Finally, we'll circle back and describe a specific implementation for the sky model and discuss how it might be extended to do cool stuff.
 
 % \begin{figure*}[ht!]
 % \begin{center}
@@ -76,7 +78,7 @@ Our first task is to describe the sky brightness model, which is a function of s
 \begin{equation}
     I(\alpha, \delta, \nu) \quad [\mathrm{Jy/beam}].
 \end{equation}
-The sky brightness has units of intensity, which usually means something like Jy/beam or Jy/steradian. R.A. increases towards the east (left). We'll get into this in more detail later, but suppose we have a setup that generates a sky brightness model (i.e., images) corresponding to specific protoplanetary disk parameters. The model parameters generally break down into two groups: those that are required to describe the morphology of the intensity (things like size of the disk, strength of the gravity field, etc\ldots), and those geometric parameters that describe the rigid-body positioning of the brightness model, i.e. translation and rotation. We'll lump the first group of parameters into $\bbeta$. Currently, $\bbeta$ contains about 7 - 10 parameters for simple disk models, though realistically we'd like to jack this up to 20 or more if we can, since current ALMA datasets demand this level of detail. The second group of parameters includes the R.A. ($\delta_\alpha$) and Dec ($\delta_\delta$) offsets of the disk centroid from the phase center of the observations and the position angle of the ascending note $\Omega$; their effects on the model can be easily applied in the Fourier domain via the shift and rotation theorems. Together, we'll call all of the  parameters describing the sky brightness model $\btheta = \left \{ \bbeta, \delta_\alpha, \delta_\delta, \Omega \right \}$. This should be enough information to get started describing how to calculate the model visibilities and their derivatives. We'll come back to describing how to calculate $I(\alpha, \delta, \nu |\, \bbeta)$ in more detail in a later section.  
+The sky brightness has units of intensity, which usually means something like Jy/beam or Jy/steradian. R.A. increases towards the east (left). We'll get into this in more detail later, but suppose we have a setup that generates a sky brightness model (i.e., images) corresponding to specific protoplanetary disk parameters. The model parameters generally break down into two groups: those that are required to describe the morphology of the intensity (things like size of the disk, strength of the gravity field, etc\ldots), and those geometric parameters that describe the rigid-body positioning of the brightness model, i.e. translation and rotation. We'll lump the first group of parameters into $\bbeta$. Currently, $\bbeta$ contains about 7 - 10 parameters for simple disk models, though realistically we'd like to jack this up to 20 or more if we can, since current ALMA datasets demand this level of detail. The second group of parameters includes the R.A. ($\delta_\alpha$) and Dec ($\delta_\delta$) offsets of the disk centroid from the phase center of the observations and the position angle of the ascending node $\Omega$; their effects on the model can be easily applied in the Fourier domain via the shift and rotation theorems. Together, we'll call all of the  parameters describing the sky brightness model $\btheta = \left \{ \bbeta, \delta_\alpha, \delta_\delta, \Omega \right \}$. This should be enough information to get started describing how to calculate the model visibilities and their derivatives. We'll come back to describing how to calculate $I(\alpha, \delta, \nu |\, \bbeta)$ in a later section.  
 
 \section{Calculating visibilities}
 Interferometers like ALMA measure the Fourier transform of the sky brightness, called the visibility function $V$
@@ -110,7 +112,7 @@ We also have
 In order to create a set of \emph{model visibilities} $\vm$ corresponding to the exact values of $\{ u, v\}_i$ in the dataset, we'll need to do some sort of interpolation from the regularly spaced samples in $\vm_\blacksquare$. 
 
 \subsection{Interpolation schemes}
-While in theory one could just use a bilinear interpolation scheme to go from $\vm_\blacksquare$ to $\vm$, this isn't the wisest thing to do. That's because any interpolation scheme with finite support will in some way affect the signal that we have sampled, and we want to control these influences as best we can. The accepted best practice among radio astronomers is to write the interpolation as the convolution of the discrete $\vm_\blacksquare$ with a prolate spheroidal wavefunction $C$, so as to form a continuous function, which is then resampled at the $\{ u, v\}_i$ points corresponding to $\vd$. This is described in detail in \citet[ch 7.3,][]{synthesis99} and \citet{schwab84}, but from the inverse perspective of putting irregularly spaced samples \emph{back onto} a regularly spaced grid to do an FFT and get an image. We've always implemented this as a pretty basic \texttt{for} loop in our codes, but let's try to write this in matrix form because that should help clarify how $\vm$ is linear w.r.t to $I$ (I think it is) and how we're going to take derivatives.
+While in theory one could just use a bilinear interpolation scheme to go from $\vm_\blacksquare$ to $\vm$, this isn't the wisest thing to do. That's because any interpolation scheme with finite support will in some way affect the signal that we have sampled, and we want to control these influences as best we can. The accepted best practice among radio astronomers is to write the interpolation as the convolution of the discrete $\vm_\blacksquare$ with a prolate spheroidal wavefunction $C$, so as to form a continuous function, which is then resampled at the $\{ u, v\}_i$ points corresponding to $\vd$. This is described in detail in \citet[ch 7.3,][]{synthesis99} and \citet{schwab84}, but from the inverse perspective of putting irregularly spaced samples \emph{back onto} a regularly spaced grid to do an FFT and get an image. We've always implemented this as a pretty basic \texttt{for} loop in our codes, but let's try to write this in matrix form because that should help clarify how $\vm$ is linear w.r.t to $I$.
 
 Let the sampling function $S$ be a bunch of $\delta$-functions at the locations of the $\{ u, v\}_i$ points in the dataset (not regularly spaced),
 \begin{equation}
@@ -130,7 +132,7 @@ and we see that the choice of convolution kernel $C$ is leaving some effect $c$ 
 \begin{equation}
     \im^c = \im \circ \frac{1}{\ct}.
 \end{equation}
-where we use the $\circ$ symbol to signify element-by-element array multiplication, also called an entrywise product, Hadamard product, or Schur product. This leads to 
+where we use the $\circ$ symbol to signify element-by-element array multiplication.\footnote{also called an entrywise product, Hadamard product, or Schur product} This leads to 
 \begin{eqnarray}
 \vm &=& \mathfrak{F} \left [ \im^c \cdot \mathfrak{F}C \right ] \cdot S \\
 \vm &=& \mathfrak{F}\left [\frac{\im}{c} \cdot c \right ] \cdot S \\
@@ -176,7 +178,7 @@ To make the interpolation/convolution process a bit more tractable, let's think 
 \end{equation}
 Thankfully, because neither the $u$ and $v$ points in the dense visibility model nor the $\{u,v\}_i$ points in the measurement set change with model parameters, calculating the convolutional prefactors is also a one-time process. We can also precalculate the denominator $w_i = \sum_j^6 \sum_k^6 C(u_j - u_i, v_k - v_i)$ and turn this into a single loop
 \begin{equation}
- V(u_i, v_i) = \sum_l^{36} C(u_l - u_i, v_l - v_i) \mathcal{W}^c_{\blacksquare l} / w_i.
+ V(u_i, v_i) = \frac{1}{w_i}\sum_l^{36} C(u_l - u_i, v_l - v_i) \mathcal{W}^c_{\blacksquare l}.
  \end{equation}
  where the index $l$ covers all of the combinations previously in the double sum over $\{j, k\}$. 
  
@@ -192,7 +194,7 @@ Thankfully, because neither the $u$ and $v$ points in the dense visibility model
 \subsection{Transforming visibilities with theorems}
 The position offsets from the phase center of the observations, $\delta_\alpha$ and $\delta_\delta$, transform the model visibilities in straightforward, analytic ways. The two dimensional shift theorem says that a translational offset in the image plane results in a phase shift in the Fourier plane \citep{bracewell00}
 \begin{equation}
-I(\alpha - \delta_\alpha, \delta - \delta_\delta) \rightleftharpoons \exp \left \{ -2 \pi \imath (\delta_\alpha u + \delta_\delta v) \right \} V(u, v).
+I(\alpha - \delta_\alpha, \delta - \delta_\delta) \rightleftharpoons \exp \left \{ -2 \pi i (\delta_\alpha u + \delta_\delta v) \right \} V(u, v).
 \end{equation}
 This means that every model visibility is phase-shifted by an amount that depends on its spatial frequencies $\{u_i, v_i\}$. Because of the $\exp$, this is a non-linear operation, but simple to implement.
 
@@ -206,7 +208,7 @@ then its Fourier transform is rotated by the same angle and in the same sense \c
 u^\prime = u \cos \Omega - v \sin \Omega \label{eqn:rotu}\\
 v^\prime = u \sin \Omega + v \cos \Omega. \label{eqn:rotv}
 \end{eqnarray}
-Since this operation requires resampling the visibility array at the rotated spatial frequencies, unlike the translational offset, it must be done using $\vm_\blacksquare$ rather than $\vm$. This operation involves recalculating $\hat{\boldsymbol{C}}$. So, unfortunately neither the translational offsets nor the rotation are simple linear operations applied to the model visibilities, but they are useful to keep in mind because it means we can make these model changes in the Fourier domain without needing to recalculate $\im$ or even redo the FFT that delivers $\vm_\blacksquare$.
+Since this operation requires resampling the visibility array at the rotated spatial frequencies, unlike the translational offset, it must be done using $\vm_\blacksquare$ rather than $\vm$. This operation involves recalculating $\hat{\boldsymbol{C}}$. So, unfortunately neither the translational offsets nor the rotation are simple linear operations applied to the model visibilities, but they are useful to keep in mind because it means we can make these model changes in the Fourier domain without needing to recalculate $\im$ or even redo the FFT that delivers $\vm_\blacksquare$. Given the way we'll be calculating the intensities and derivatives, it is an open question as to whether it will be faster to utilize these algorithms in the Fourier plane, or just simply calculate a new image-plane model with these offsets and rotations, that way the terms in $\hat{\boldsymbol{C}}$ can remain fixed throughout the problem.
 
 \subsection{Likelihood Calculation}
 
@@ -214,32 +216,65 @@ With model visibilities in hand, we can calculate the likelihood of the dataset 
 \begin{equation}
     {\cal L}(\vd |\, \boldsymbol{\theta}) = {\cal N}(\boldsymbol{\mathcal{V}} |\, \boldsymbol{\mathcal{W}}(\boldsymbol{\theta}), \boldsymbol{\Sigma}).
 \end{equation}
-Typically we just treat the visibilities as independent measurements ($\boldsymbol{\Sigma}$ is diagonal), and so we have a simple $\chi^2$ likelihood of
+Typically we just treat the visibilities as independent measurements ($\boldsymbol{\Sigma}$ is diagonal), and so this is equivalent to a simple $\chi^2$ likelihood of
 \begin{equation}
     \ln {\cal L}(\btheta) = - \frac{1}{2} \sum_i^N \frac{|\vd - \vm(\btheta)|^2}{\sigma_i^2}.
 \end{equation}
-Note that the likelihood is a scalar quantity. Next, we want to calculate the gradient of the likelihood with respect to the model parameters,
+If all of the operations to calculate $\vm(\btheta)$ were implemented using an autograd framework like \texttt{Theano}, then the gradient of the likelihood w.r.t. the parameters can be calculated automatically. If there is a function we need that \texttt{Theano} doesn't provide, we'll need to implement this ourselves in \texttt{C++} as a \texttt{Theano} ``op.''
+
+\section{toy sky model in 1D}
+Let's see if we can implement the full framework using a simple Gaussian as a sky model. Also, we'll do everything in 1D for now, considering just a single channel.
+
+In our implementation, we'll calculate $\vm$ as if we didn't know there were an analytic solution for $V$ (i.e., going through the FFT and convolutional sampling operations), and then we'll check to make sure it's the same in the end (up to some numerical precision). Let the sky model be
 \begin{equation}
-    \nabla \mathcal{L}
+I(\alpha |\, \boldsymbol{\beta}) = a \exp \left [ -  \frac{(\alpha^\prime - \delta_\alpha)^2}{2 \sigma_\alpha^2} \right ]
 \end{equation}
-which I assume will involve calculating the partial derivatives of $\vm$ with respect to the components $\btheta$. 
+where $\bbeta = \{a, \delta_\alpha, \sigma_\alpha\}$. The model visibility function is 
+\begin{equation}
+V(u |\, \boldsymbol{\beta}) = a \sqrt{2 \pi} \sigma_\alpha \exp \left [ -2 \pi^2 \sigma_\alpha^2 u^2 - 2 \pi i \delta_\alpha u \right ].
+\end{equation}
 
-I think the idea is that we'll need to implement this math as \texttt{Theano} operations, and if there is something we need that \texttt{Theano} doesn't have, we'll need to implement this ourselves in \texttt{C++}.
+It seems like we have something interesting implemented in \theano, so let's check the derivative analytically to make sure we're on the right track. 
+\begin{equation}
+    \frac{\mathrm{d}V}{\mathrm{d}\delta_\alpha} = -2 \pi i u V
+\end{equation}
 
-\section{Toy sky model}
-So, let's try to implement this in \texttt{Theano}\footnote{\url{http://deeplearning.net/software/theano/}} starting with an analytic function for sky brightness and see if we can get \texttt{PyMC3} hooked up properly. Then we can move to more exciting sky brightness profiles. The simplest sky model I can think of is a Gaussian, since its Fourier transform is also a Gaussian. To keep things simple for now, we'll just consider a single channel. To make things more interesting (and hopefully catch edge-cases in the implementation), let's implement an elliptical shape, rotation, and phase-center offset. In this case, $\bbeta = \{a, \sigma_x, \sigma_y, \Omega, \delta_\alpha, \delta_\delta \}$, where $a$ is the peak amplitude of the Gaussian in the image domain and $\sigma_x$ and $\sigma_y$ are the semi-major axes of the Gaussian in the R.A. and Dec directions, respectively. We'll define the rotated coordinates according to Equations~\ref{eqn:rota}, \ref{eqn:rotd}, \ref{eqn:rotu}, and \ref{eqn:rotv}, where a positive $\Omega$ means that the Gaussian is rotated towards east of north (counter-clockwise in the sky plane). If the sky-plane model\footnote{Remember that $\alpha$, $\delta$, $\delta_\alpha$, and $\delta_\delta$ are in radians and $u$ and $v$ are in wavelengths.} is
+\begin{equation}
+    \frac{\mathrm{d}V}{\mathrm{d}a} = \frac{V}{a}
+\end{equation}
+
+\begin{equation}
+    \frac{\mathrm{d}V}{\mathrm{d}\sigma_\alpha} = V \left ( \frac{1}{\sigma_\alpha} - 4 \pi^2 \sigma_\alpha u^2 \right)
+\end{equation}
+
+Because we know that the sky intensity must be real, the Fourier transform is an even function.
+\begin{equation}
+    V(u) = V(-u).
+\end{equation}
+We will need to unpack the output from the \texttt{rfft} into something spanning the full range of $u$ values. This is because the interferometer truly records different data for $u$ and $-u$, and so we will need to count these appropriately in the likelihood by replicating the model to match.
+
+\section{toy sky model in 2D}
+To make things more interesting (and hopefully catch edge-cases in the implementation), let's implement an elliptical shape, rotation, and phase-center offset. In this case, $\bbeta = \{a, \sigma_x, \sigma_y, \Omega, \delta_\alpha, \delta_\delta \}$, where $a$ is the peak amplitude of the Gaussian in the image domain and $\sigma_x$ and $\sigma_y$ are the semi-major axes of the Gaussian in the R.A. and Dec directions, respectively. We'll define the rotated coordinates according to Equations~\ref{eqn:rota}, \ref{eqn:rotd}, \ref{eqn:rotu}, and \ref{eqn:rotv}, where a positive $\Omega$ means that the Gaussian is rotated towards east of north (counter-clockwise in the sky plane). If the sky-plane model\footnote{Remember that $\alpha$, $\delta$, $\delta_\alpha$, and $\delta_\delta$ are in radians and $u$ and $v$ are in wavelengths.} is
 \begin{equation}
     I(\alpha, \delta |\, \bbeta) = a \exp \left [ - \left \{  \frac{(\alpha^\prime - \delta_\alpha)^2}{2 \sigma_\alpha^2} + \frac{(\delta^\prime - \delta_\delta)^2}{2 \sigma_\delta^2} \right \} \right ]
 \end{equation}
 then the model visibility function (via Fourier transform pairs \citep[e.g., ch. 16,][]{bracewell00}) is
 \begin{equation}
-    V(u, v |\, \bbeta) = a e^{- 2 \pi \imath (\delta_\alpha u^\prime + \delta_\alpha v^\prime)} \exp \left [ -2 (\sigma_\alpha^2 u^{\prime 2} + \sigma_\delta^2 v^{\prime 2}) \right ].
+    V(u, v |\, \bbeta) = 2 \pi a \sigma_\alpha \sigma_\delta \exp \left [ -2 \pi^2 (\sigma_\alpha^2 u^{\prime 2} + \sigma_\delta^2 v^{\prime 2}) - 2 \pi i (\delta_\alpha u^\prime + \delta_\delta v^\prime)\right ].
 \end{equation}
+
+As before, let's calculate some gradients to check \theano's calculation.
 
 In our implementation, we'll calculate $\vm$ as if we didn't know there were an analytic solution for $V$ (i.e., going through the FFT and convolutional sampling operations), and then we'll check to make sure it's the same in the end (up to some numerical precision).
 
+Because we know that the sky intensity must be real (but likely not symmetric), the Fourier transform is Hermitian
+\begin{equation}
+    V(u, v) = {}^*V(-u, -v).
+\end{equation}
 
+It appears as though \theano\ has \texttt{rfft} support for 2D transforms, where the real FFT is performed on the last axis of the input. This is similar to what happens with numpy as well. So, if we pack the image normally, then we'll get only $+u$ values but the full range of $\pm v$ values. This complicates the unpacking somewhat.
 
+Interesting analytical examples of radio galaxy HMC fitting \citep{rivi19}.
 % \section{Extra stuff}
 % Baseline-dependent phase errors may make this less true. See \citet{hezaveh13} for the proper way to bake these into the inference loop, if we so desire, but we will just ignore them for now.
 
