@@ -74,10 +74,11 @@ In this paper, we try to incorporate some inspirations from these data-driven te
 % \end{figure*}
 
 \section{Sky model basics}
-Our first task is to describe the sky brightness model, which is a function of sky position and, for molecular line datasets, also frequency
+Our first task is to describe the sky brightness model, which is a function of sky position and frequency
 \begin{equation}
-    I(\alpha, \delta, \nu) \quad [\mathrm{Jy/beam}].
+    I(\alpha, \delta, \nu) \quad [\mathrm{Jy/beam}],
 \end{equation}
+though for most continuum datasets the frequency dependency is ignored.
 The sky brightness has units of intensity, which usually means something like Jy/beam or Jy/steradian. R.A. increases towards the east (left). We'll get into this in more detail later, but suppose we have a setup that generates a sky brightness model (i.e., images) corresponding to specific protoplanetary disk parameters. The model parameters generally break down into two groups: those that are required to describe the morphology of the intensity (things like size of the disk, strength of the gravity field, etc\ldots), and those geometric parameters that describe the rigid-body positioning of the brightness model, i.e. translation and rotation. We'll lump the first group of parameters into $\bbeta$. Currently, $\bbeta$ contains about 7 - 10 parameters for simple disk models, though realistically we'd like to jack this up to 20 or more if we can, since current ALMA datasets demand this level of detail. The second group of parameters includes the R.A. ($\delta_\alpha$) and Dec ($\delta_\delta$) offsets of the disk centroid from the phase center of the observations and the position angle of the ascending node $\Omega$; their effects on the model can be easily applied in the Fourier domain via the shift and rotation theorems. Together, we'll call all of the  parameters describing the sky brightness model $\btheta = \left \{ \bbeta, \delta_\alpha, \delta_\delta, \Omega \right \}$. This should be enough information to get started describing how to calculate the model visibilities and their derivatives. We'll come back to describing how to calculate $I(\alpha, \delta, \nu |\, \bbeta)$ in a later section.  
 
 \section{Calculating visibilities}
@@ -145,7 +146,7 @@ Therefore, as opposed to Eqn~\ref{eqn:wrong-conv}, the convolution and sampling 
 
 Now that we've covered the basics of the signal processing, let's write the generation of $\vm$ from $\im$ in true matrix form. To make the calculation of $C$ and $c$ explicit, we'll first need to define the prolate spheroidal function $\psi(\eta)$.\footnote{There are many variant forms of $\psi$ depending on how many nearest neighbor gridpoints we'd like to include (the support size $m$) and how concentrated we'd like the peak to be (the exponent $\alpha$), but the standard one employed by radio astronomers seems to be the spheroid with $m = 6$ and $\alpha = 1$, so from here on assume that we're referring to that function so that we can drop the extra subscripts. If you're interested in a different kernel choice, all of the necessary detail is in \citet{schwab84}.} This function is usually implemented via a polynomial approximation like many other special functions, which we'll describe in the appendix. For a mental picture, it's essentially like a Gaussian taper from 1 to 0 over the domain [0,1]. We'll use it to create a two dimensional kernel that convolves over a $6 \times 6$ subgrid of points within $\vm_\blacksquare$.
 
-The two dimensional convolution kernel is separable, so we have $C(u,v) = C_1(u)C_2(v)$. The one dimensional convolutional kernel is 
+The two dimensional convolution kernel is separable, so we have $C(u,v) = C_1(u)C_2(v)$. The one-dimensional convolutional kernel is 
 \begin{equation}
     C(\eta) = |1 - \eta^2| \psi(\eta).
 \end{equation}
@@ -158,7 +159,7 @@ For completeness, the full two dimensional kernel is
 \begin{equation}
     C(u,v) = |1 - \eta(u)^2| |1 - \eta(v)^2| \psi(\eta(u)) \psi(\eta(v)) 
 \end{equation}
-The one dimensional taper in the map plane is simply 
+The one-dimensional taper in the map plane is simply 
 \begin{equation}
     c(\eta) = \psi(\eta)
 \end{equation}
@@ -209,6 +210,9 @@ u^\prime = u \cos \Omega - v \sin \Omega \label{eqn:rotu}\\
 v^\prime = u \sin \Omega + v \cos \Omega. \label{eqn:rotv}
 \end{eqnarray}
 Since this operation requires resampling the visibility array at the rotated spatial frequencies, unlike the translational offset, it must be done using $\vm_\blacksquare$ rather than $\vm$. This operation involves recalculating $\hat{\boldsymbol{C}}$. So, unfortunately neither the translational offsets nor the rotation are simple linear operations applied to the model visibilities, but they are useful to keep in mind because it means we can make these model changes in the Fourier domain without needing to recalculate $\im$ or even redo the FFT that delivers $\vm_\blacksquare$. Given the way we'll be calculating the intensities and derivatives, it is an open question as to whether it will be faster to utilize these algorithms in the Fourier plane, or just simply calculate a new image-plane model with these offsets and rotations, that way the terms in $\hat{\boldsymbol{C}}$ can remain fixed throughout the problem.
+
+\subsection{Gradients of interpolated visibilities}
+We need to look up the specific math for the gradients, but behind the scenes a framework like \texttt{theano} is calculating derivatives of the sparse matrix product $\vm = \hat{\boldsymbol{C}} \hat{\vm_\blacksquare^c}$. We tried an implementation where we actually initialized $\hat{\boldsymbol{C}}$ as a sparse matrix, but this might not ultimately scale well. We follow the notation in the \todo{Giles 08} document, which basically says we'll need to calculate the derivatives of the matrix w.r.t. each of the parameters using the chain rule. So, unless we're implementing a rotation operation, I think that the derivative of $\hat{\boldsymbol{C}}$ w.r.t. to any of the model parameters is going to be $0$, which means that we might be able to calculate the derivatives of the model using only the derivatives of the FFT. Anyway, we should see if this actually scales as badly as we think it might. 
 
 \subsection{Likelihood Calculation}
 
@@ -282,6 +286,8 @@ Interesting analytical examples of radio galaxy HMC fitting \citep{rivi19}.
 
 % \section{Modeling the radial intensity profile}
 % How smooth is the radial profile, and can we use a Nuker profile to model it?
+
+Notes about calculating gradients of C.
 
 
 \acknowledgments
